@@ -9,16 +9,14 @@ const io = require('socket.io')(server,{
 });
 
 io.on("connection", (socket) => {
-
-    console.log("what is socket?", socket);
-    console.log("socket is active to be connected");
-
     socket.on("chat", (payload) => {
-        console.log("what is payload? ", payload);
         io.emit("chat", payload);
     });
 
 })
 server.listen(5000,()=>{
     console.log("server is listening to port 5000 ...");
-})
+});
+ socket.on('disconnect', () => {
+        console.log('A user disconnected');
+    });
