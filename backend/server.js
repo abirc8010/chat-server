@@ -5,10 +5,18 @@ const io = require('socket.io')(server, {
         origin: "*",
     }
 });
+const usernameToSocketIdMap = new Map();
+io.on("connection", (socket,next) => {
+    const username = socket.handshake.auth.username;
+    console.log("User connected",username);
+       usernameToSocketIdMap.set(username, socket.id);
+       console.log(usernameToSocketIdMap);
+    socket.on("private message", (payload) => {
+         const receiverSocketId = usernameToSocketIdMap.get(payload.receiver);
 
-io.on("connection", (socket) => {
-    console.log("User connected");
-
+        console.log("private message", receiverSocketId);
+        socket.to(receiverSocketId).emit("private message", payload);
+    });
     socket.on("chat", (payload) => {
         io.emit("chat", payload);
     });
@@ -22,8 +30,8 @@ io.on("connection", (socket) => {
     });
 
     socket.on("stopTyping", () => {
-         socket.broadcast.emit("notifyStopTyping");
-          });
+        socket.broadcast.emit("notifyStopTyping");
+    });
 });
 
 server.listen(5000, () => {
