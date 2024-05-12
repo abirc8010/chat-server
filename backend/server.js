@@ -13,9 +13,12 @@ io.on("connection", (socket,next) => {
        console.log(usernameToSocketIdMap);
     socket.on("private message", (payload) => {
          const receiverSocketId = usernameToSocketIdMap.get(payload.receiver);
-
+            if (payload.url) {
+            io.to(receiverSocketId).emit("private message", payload);
+        } else {           
+            socket.to(receiverSocketId).emit("private message", payload);
+        }
         console.log("private message", receiverSocketId);
-        socket.to(receiverSocketId).emit("private message", payload);
     });
     socket.on("chat", (payload) => {
         io.emit("chat", payload);
