@@ -1,4 +1,6 @@
 require('dotenv').config();
+const fs = require('fs').promises;
+const path = require('path');
 const app = require('express')();
 const server = require('http').createServer(app);
 const io = require('socket.io')(server, {
@@ -7,9 +9,13 @@ const io = require('socket.io')(server, {
     }
 });
 const mongoose = require('mongoose');
-const { type } = require('os');
+const cloudinary = require('cloudinary').v2;
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-// Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URL, {
 
 }).then(() => {
@@ -20,7 +26,11 @@ mongoose.connect(process.env.MONGODB_URL, {
 
 const userSchema = new mongoose.Schema({
     username: String,
-    contacts: [String]
+    contacts: [String],
+    profilePicture: {
+        type: String,
+        default: 'you.webp'
+    }
 });
 
 const messageSchema = new mongoose.Schema({
@@ -40,8 +50,8 @@ const messageSchema = new mongoose.Schema({
         default: null
     },
     Time: {
-       type: String,
-       default: null
+        type: String,
+        default: null
     }
 });
 
@@ -56,6 +66,50 @@ io.on("connection", async (socket, next) => {
     console.log("User connected", username);
     usernameToSocketIdMap.set(username, socket.id);
     console.log(usernameToSocketIdMap);
+
+    // Inside the connection event handler
+    socket.on("getUserProfilePicture", async (data) => {
+        const username = data.username;
+        console.log("Getting profile picture for user:", username);
+        try {
+            // Find the user by username
+            const user = await User.findOne({ username });
+
+            if (!user) {
+                // If user not found, emit an error event or empty response
+                socket.emit("userProfilePicture", { error: "User not found" });
+                return;
+            }
+
+            // Emit the user's profile picture to the client
+            socket.emit("userProfilePicture", { profilePicture: user.profilePicture });
+        } catch (error) {
+            console.error("Error getting user profile picture:", error);
+            // Emit an error event if there's an error during database query
+            socket.emit("userProfilePicture", { error: "Error getting user profile picture" });
+        }
+    });
+
+    // Event handler for uploading profile pictures
+    socket.on("uploadProfilePicture", async (data) => {
+        const username = data.username;
+        const fileData = data.fileData; // Base64 encoded image data
+          console.log("trigerred");
+        try {
+            const imageUrl = await uploadProfilePicture(username, fileData);
+                 console.log('Profile picture uploaded and updated for user:', imageUrl);
+            // Update the user's profile picture URL in the database with the Cloudinary URL
+            await User.findOneAndUpdate({ username: username }, { profilePicture: imageUrl });
+
+            console.log('Profile picture uploaded and updated for user:', username);
+            socket.emit("profilePictureUploaded", { success: true });
+        } catch (error) {
+            console.error('Error uploading profile picture:', error);
+            socket.emit("profilePictureUploaded", { success: false, error: error.message });
+        }
+    });
+
+
     // Server-side: Listen for "getContactList" event
     socket.on("getContactList", async (username) => {
         try {
@@ -112,6 +166,7 @@ io.on("connection", async (socket, next) => {
             console.error('Error retrieving conversation history:', error);
         }
     });
+
     // Inside the socket.io connection event handler
     socket.on("addContact", async (payload) => {
         try {
@@ -131,7 +186,6 @@ io.on("connection", async (socket, next) => {
             console.error('Error adding contact:', error);
         }
     });
-
 
     socket.on("private message", async (payload) => {
         const receiverSocketId = usernameToSocketIdMap.get(payload.receiver);
@@ -198,5 +252,28 @@ async function getConversationHistory(sender, receiver) {
     } catch (error) {
         console.error('Error retrieving conversation history:', error);
         return [];
+    }
+}
+
+async function uploadProfilePicture(username, fileData) {
+    try {
+        // Create a temporary file path
+        const tempFilePath = path.join(__dirname, 'temp', `${username}_profile_picture.jpg`);
+
+        // Write the base64 encoded image data to the temporary file
+        await fs.writeFile(tempFilePath, fileData, 'base64');
+
+        // Upload the image to Cloudinary using the file path
+        const result = await cloudinary.uploader.upload(tempFilePath, {
+            folder: 'profile-pictures', // Optional: specify folder to organize uploads
+        });
+
+        // Delete the temporary file
+        await fs.unlink(tempFilePath);
+
+        return result.secure_url; // Return the URL of the uploaded image
+    } catch (error) {
+        console.error('Error uploading profile picture to Cloudinary:', error);
+        throw error;
     }
 }
