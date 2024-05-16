@@ -66,7 +66,27 @@ io.on("connection", async (socket, next) => {
     console.log("User connected", username);
     usernameToSocketIdMap.set(username, socket.id);
     console.log(usernameToSocketIdMap);
+    socket.on("getPicture", async (data) => {
+        const username = data.username;
+        console.log("Getting profile picture for user:", username);
+        try {
+            // Find the user by username
+            const user = await User.findOne({ username });
 
+            if (!user) {
+                // If user not found, emit an error event or empty response
+                socket.emit("Picture", { error: "User not found" });
+                return;
+            }
+
+            // Emit the user's profile picture to the client
+            socket.emit("Picture", {username:username, profilePicture: user.profilePicture });
+        } catch (error) {
+            console.error("Error getting user profile picture:", error);
+            // Emit an error event if there's an error during database query
+            socket.emit("Picture", { error: "Error getting user profile picture" });
+        }
+    });
     // Inside the connection event handler
     socket.on("getUserProfilePicture", async (data) => {
         const username = data.username;
@@ -94,10 +114,10 @@ io.on("connection", async (socket, next) => {
     socket.on("uploadProfilePicture", async (data) => {
         const username = data.username;
         const fileData = data.fileData; // Base64 encoded image data
-          console.log("trigerred");
+        console.log("trigerred");
         try {
             const imageUrl = await uploadProfilePicture(username, fileData);
-                 console.log('Profile picture uploaded and updated for user:', imageUrl);
+            console.log('Profile picture uploaded and updated for user:', imageUrl);
             // Update the user's profile picture URL in the database with the Cloudinary URL
             await User.findOneAndUpdate({ username: username }, { profilePicture: imageUrl });
 
