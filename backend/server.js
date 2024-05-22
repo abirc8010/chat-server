@@ -16,7 +16,7 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-mongoose.connect('mongodb://localhost/WebChat', {
+mongoose.connect(meta.env.SERVER_URL, {
 
 }).then(() => {
     console.log('Connected to MongoDB');
