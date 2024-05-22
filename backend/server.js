@@ -16,7 +16,7 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-mongoose.connect(process.env.MONGODB_URL, {
+mongoose.connect('mongodb://localhost/WebChat', {
 
 }).then(() => {
     console.log('Connected to MongoDB');
@@ -68,11 +68,11 @@ io.on("connection", async (socket, next) => {
     console.log(usernameToSocketIdMap);
     socket.on("getPicture", async (data) => {
         const username = data.username;
-        console.log("Getting profile picture for user:", username);
         try {
             // Find the user by username
             const user = await User.findOne({ username });
 
+        console.log("Getting profile picture for user:", user);
             if (!user) {
                 // If user not found, emit an error event or empty response
                 socket.emit("Picture", { error: "User not found" });
@@ -90,7 +90,7 @@ io.on("connection", async (socket, next) => {
     // Inside the connection event handler
     socket.on("getUserProfilePicture", async (data) => {
         const username = data.username;
-        console.log("Getting profile picture for user:", username);
+        console.log("Current profile pic:", data.username);
         try {
             // Find the user by username
             const user = await User.findOne({ username });
@@ -207,7 +207,7 @@ io.on("connection", async (socket, next) => {
         }
     });
 
-    socket.on("private message", async (payload) => {
+    socket.on("send privateMessage", async (payload) => {
         const receiverSocketId = usernameToSocketIdMap.get(payload.receiver);
         try {
             // Create message data object with sender, receiver, and message attributes
