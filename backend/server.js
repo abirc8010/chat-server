@@ -25,6 +25,7 @@ mongoose.connect(process.env.MONGODB_URL, {
 });
 
 const userSchema = new mongoose.Schema({
+    email: String,
     username: String,
     contacts: [String],
     profilePicture: {
@@ -59,20 +60,54 @@ const messageSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 const Message = mongoose.model('Message', messageSchema);
 
-const usernameToSocketIdMap = new Map();
+const emailToSocketIdMap = new Map();
 
 io.on("connection", async (socket, next) => {
-    const username = socket.handshake.auth.username;
-    console.log("User connected", username);
-    usernameToSocketIdMap.set(username, socket.id);
-    console.log(usernameToSocketIdMap);
-    socket.on("getPicture", async (data) => {
-        const username = data.username;
+    const email = socket.handshake.auth.email;
+    const username = socket.handshake.auth.current_username;
+    console.log("User connected:", email, username);
+    emailToSocketIdMap.set(email, socket.id);
+    console.log(emailToSocketIdMap);
+    try {
+        let user = await User.findOne({ email: email, username });
+        if (!user) {
+            const newUser = new User({
+                email: email,
+                username: username,
+                contacts: []
+            });
+            user = await newUser.save();
+        }
+    }
+    catch (error) {
+        console.error('Error storing user in database:', error);
+    }
+    socket.on("getUsernameByEmail", async (email) => {
         try {
-            // Find the user by username
-            const user = await User.findOne({ username });
+            // Find the user by email
+            const user = await User.findOne({ email });
+            if (!user) {
+                // If user not found, emit an error event or empty response
+                socket.emit("usernameByEmail", { error: "User not found" });
+                return;
+            }
+            console.log("getting username by email:", email);
+            // Emit the user's username to the client
+            socket.emit("usernameByEmail", { username: user.username });
+        } catch (error) {
+            console.error("Error getting username by email:", error);
+            // Emit an error event if there's an error during database query
+            socket.emit("usernameByEmail", { error: "Error getting username by email" });
+        }
+    });
 
-        console.log("Getting profile picture for user:", user);
+    socket.on("getPicture", async (data) => {
+        const email = data.email; // Change to use email instead of username
+        try {
+            // Find the user by email
+            const user = await User.findOne({ email });
+
+            console.log("Getting profile picture for user:", user);
             if (!user) {
                 // If user not found, emit an error event or empty response
                 socket.emit("Picture", { error: "User not found" });
@@ -80,20 +115,20 @@ io.on("connection", async (socket, next) => {
             }
 
             // Emit the user's profile picture to the client
-            socket.emit("Picture", {username:username, profilePicture: user.profilePicture });
+            socket.emit("Picture", { email: email, profilePicture: user.profilePicture, username: user.username });
         } catch (error) {
             console.error("Error getting user profile picture:", error);
             // Emit an error event if there's an error during database query
             socket.emit("Picture", { error: "Error getting user profile picture" });
         }
     });
-    // Inside the connection event handler
+
     socket.on("getUserProfilePicture", async (data) => {
-        const username = data.username;
-        console.log("Current profile pic:", data.username);
+        const email = data.email;
+        console.log("Current profile pic:", email);
         try {
-            // Find the user by username
-            const user = await User.findOne({ username });
+            // Find the user by email
+            const user = await User.findOne({ email });
 
             if (!user) {
                 // If user not found, emit an error event or empty response
@@ -110,18 +145,17 @@ io.on("connection", async (socket, next) => {
         }
     });
 
-    // Event handler for uploading profile pictures
     socket.on("uploadProfilePicture", async (data) => {
-        const username = data.username;
+        const email = data.email;
         const fileData = data.fileData; // Base64 encoded image data
         console.log("trigerred");
         try {
-            const imageUrl = await uploadProfilePicture(username, fileData);
+            const imageUrl = await uploadProfilePicture(email, fileData);
             console.log('Profile picture uploaded and updated for user:', imageUrl);
             // Update the user's profile picture URL in the database with the Cloudinary URL
-            await User.findOneAndUpdate({ username: username }, { profilePicture: imageUrl });
+            await User.findOneAndUpdate({ email: email }, { profilePicture: imageUrl });
 
-            console.log('Profile picture uploaded and updated for user:', username);
+            console.log('Profile picture uploaded and updated for user:', email);
             socket.emit("profilePictureUploaded", { success: true });
         } catch (error) {
             console.error('Error uploading profile picture:', error);
@@ -129,12 +163,10 @@ io.on("connection", async (socket, next) => {
         }
     });
 
-
-    // Server-side: Listen for "getContactList" event
-    socket.on("getContactList", async (username) => {
+    socket.on("getContactList", async (email) => {
         try {
-            // Find the user by username
-            const user = await User.findOne({ username });
+            // Find the user by email
+            const user = await User.findOne({ email });
 
             if (!user) {
                 // If user not found, emit an error event or empty list
@@ -151,56 +183,41 @@ io.on("connection", async (socket, next) => {
         }
     });
 
-    // Storing user in the database if not already present
-    try {
-        let user = await User.findOne({ username: username });
-        if (!user) {
-            const newUser = new User({
-                username: username,
-                contacts: []
-            });
-            user = await newUser.save();
-        }
-    }
-    catch (error) {
-        console.error('Error storing user in database:', error);
-    }
 
     socket.on("getHistory", async (payload) => {
-        const username = payload.username;
+        const email = payload.email;
 
         try {
-            const user = await User.findOne({ username: username });
+            const user = await User.findOne({ email: email });
             if (!user) {
-                console.log("User not found:", username);
+                console.log("User not found:", email);
                 return; // Exit early if user not found
             }
 
             // Iterate through user's contacts and retrieve conversation history for each contact
             for (const contact of user.contacts) {
-                const messages = await getConversationHistory(username, contact);
+                const messages = await getConversationHistory(email, contact);
                 // Emit history back to the user
-                socket.emit("history", { sender: username, receiver: contact, messages });
+                socket.emit("history", { sender: email, receiver: contact, messages });
             }
         } catch (error) {
             console.error('Error retrieving conversation history:', error);
         }
     });
 
-    // Inside the socket.io connection event handler
     socket.on("addContact", async (payload) => {
         try {
-            console.log("Adding contact:", payload.contactUsername, "for user:", payload.username);
+            console.log("Adding contact:", payload.contactEmail, "for user:", payload.email);
             const user = await User.findOneAndUpdate(
-                { username: payload.username }, // Find the user by their username
-                { $addToSet: { contacts: payload.contactUsername } }, // Add the contact to the contacts array if not already present
+                { email: payload.email }, // Find the user by their email
+                { $addToSet: { contacts: payload.contactEmail } }, // Add the contact to the contacts array if not already present
                 { new: true } // Return the updated user document
             );
 
             if (user) {
                 console.log("Contact added successfully. Updated user:", user);
             } else {
-                console.log("User not found:", payload.username);
+                console.log("User not found:", payload.email);
             }
         } catch (error) {
             console.error('Error adding contact:', error);
@@ -208,11 +225,11 @@ io.on("connection", async (socket, next) => {
     });
 
     socket.on("send privateMessage", async (payload) => {
-        const receiverSocketId = usernameToSocketIdMap.get(payload.receiver);
+        const receiverSocketId = emailToSocketIdMap.get(payload.receiver);
         try {
             // Create message data object with sender, receiver, and message attributes
             const messageData = {
-                sender: payload.username,
+                sender: payload.email,
                 receiver: payload.receiver,
                 message: payload.message,
                 Time: payload.Time,
@@ -241,6 +258,10 @@ io.on("connection", async (socket, next) => {
     });
 
     socket.on("typing", (data) => {
+        const receiverSocketId = emailToSocketIdMap.get(data.receiver);
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("notifyTyping", data);
+        }
         socket.broadcast.emit("notifyTyping", data);
     });
 
@@ -275,10 +296,10 @@ async function getConversationHistory(sender, receiver) {
     }
 }
 
-async function uploadProfilePicture(username, fileData) {
+async function uploadProfilePicture(email, fileData) {
     try {
         // Create a temporary file path
-        const tempFilePath = path.join(__dirname, 'temp', `${username}_profile_picture.jpg`);
+        const tempFilePath = path.join(__dirname, 'temp', `${email}_profile_picture.jpg`);
 
         // Write the base64 encoded image data to the temporary file
         await fs.writeFile(tempFilePath, fileData, 'base64');
