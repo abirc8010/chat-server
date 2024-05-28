@@ -16,7 +16,7 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-mongoose.connect(process.env.MONGODB_URL, {
+mongoose.connect(import.meta.env.VITE_MONGODB_URL, {
 
 }).then(() => {
     console.log('Connected to MongoDB');
@@ -65,22 +65,24 @@ const emailToSocketIdMap = new Map();
 io.on("connection", async (socket, next) => {
     const email = socket.handshake.auth.email;
     const username = socket.handshake.auth.current_username;
-    console.log("User connected:", email, username);
-    emailToSocketIdMap.set(email, socket.id);
-    console.log(emailToSocketIdMap);
-    try {
-        let user = await User.findOne({ email: email, username });
-        if (!user) {
-            const newUser = new User({
-                email: email,
-                username: username,
-                contacts: []
-            });
-            user = await newUser.save();
+    if (email && username) {
+        console.log("User connected:", email, username);
+        emailToSocketIdMap.set(email, socket.id);
+        console.log(emailToSocketIdMap);
+        try {
+            let user = await User.findOne({ email: email, username });
+            if (!user) {
+                const newUser = new User({
+                    email: email,
+                    username: username,
+                    contacts: []
+                });
+                user = await newUser.save();
+            }
         }
-    }
-    catch (error) {
-        console.error('Error storing user in database:', error);
+        catch (error) {
+            console.error('Error storing user in database:', error);
+        }
     }
     socket.on("getUsernameByEmail", async (email) => {
         try {
@@ -208,21 +210,28 @@ io.on("connection", async (socket, next) => {
     socket.on("addContact", async (payload) => {
         try {
             console.log("Adding contact:", payload.contactEmail, "for user:", payload.email);
-            const user = await User.findOneAndUpdate(
-                { email: payload.email }, // Find the user by their email
-                { $addToSet: { contacts: payload.contactEmail } }, // Add the contact to the contacts array if not already present
-                { new: true } // Return the updated user document
-            );
+            const receipient = await User.findOne({ email: payload.contactEmail });
+          
+            if (receipient) {
+                // If the user is found, update their contacts
+                const updatedUser = await User.findOneAndUpdate(
+                    { email: payload.email }, // Find the user by their email
+                    { $addToSet: { contacts: payload.contactEmail } }, // Add the contact to the contacts array if not already present
+                    { new: true } // Return the updated user document
+                );
 
-            if (user) {
-                console.log("Contact added successfully. Updated user:", user);
+                console.log("Contact added successfully. Updated user:", updatedUser);
             } else {
+                // If the user is not found, emit a "failed" event
                 console.log("User not found:", payload.email);
+                socket.emit("failed");
             }
         } catch (error) {
             console.error('Error adding contact:', error);
+            socket.emit("failed");
         }
     });
+
 
     socket.on("send privateMessage", async (payload) => {
         const receiverSocketId = emailToSocketIdMap.get(payload.receiver);
