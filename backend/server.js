@@ -16,7 +16,7 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-mongoose.connect(import.meta.env.VITE_MONGODB_URL, {
+mongoose.connect(process.env.MONGODB_URL, {
 
 }).then(() => {
     console.log('Connected to MongoDB');
