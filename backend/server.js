@@ -220,7 +220,7 @@ io.on("connection", async (socket, next) => {
                     { new: true } // Return the updated user document
                 );
 
-                console.log("Contact added successfully. Updated user:", updatedUser);
+                socket.emit("success");
             } else {
                 // If the user is not found, emit a "failed" event
                 console.log("User not found:", payload.email);
