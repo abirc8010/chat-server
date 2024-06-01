@@ -42,6 +42,10 @@ const groupSchema = new mongoose.Schema({
 const userSchema = new mongoose.Schema({
     email: String,
     username: String,
+    uid:{
+        type:String,
+        default:null
+    },
     contacts: [String],
     profilePicture: {
         type: String,
