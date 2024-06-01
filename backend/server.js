@@ -24,6 +24,21 @@ mongoose.connect(process.env.MONGODB_URL, {
     console.error('Error connecting to MongoDB:', error);
 });
 
+const groupSchema = new mongoose.Schema({
+    groupName: String,
+    groupPicture: {
+        type: String,
+        default: 'you.webp'
+    },
+    admin: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User' // Reference to the User schema
+    },
+    members: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }]
+});
 const userSchema = new mongoose.Schema({
     email: String,
     username: String,
@@ -31,6 +46,10 @@ const userSchema = new mongoose.Schema({
     profilePicture: {
         type: String,
         default: 'you.webp'
+    },
+    groups: {
+        type: [groupSchema],
+        default: null
     }
 });
 
@@ -53,6 +72,11 @@ const messageSchema = new mongoose.Schema({
     Time: {
         type: String,
         default: null
+    },
+    type: {
+        type: String,
+        enum: ['private', 'group'],
+        default: 'private'
     }
 });
 
@@ -60,6 +84,7 @@ const messageSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 const Message = mongoose.model('Message', messageSchema);
 
+const Group = mongoose.model('Group', groupSchema);
 const emailToSocketIdMap = new Map();
 
 io.on("connection", async (socket, next) => {
@@ -84,6 +109,53 @@ io.on("connection", async (socket, next) => {
             console.error('Error storing user in database:', error);
         }
     }
+    socket.on("createGroup", async (data) => {
+        try {
+            const { groupName, adminEmail, memberEmails } = data;
+
+            const admin = await User.findOne({ email: adminEmail });
+            const members = await User.find({ email: { $in: memberEmails } });
+            console.log(members);
+            const newGroup = new Group({
+                groupName: groupName,
+                admin: admin._id,
+                members: [admin._id, ...members.map(member => member._id)]
+            });
+            console.log("New group:", newGroup);
+            await newGroup.save();
+            for (const member of members) {
+                member.groups.push(newGroup._id);
+                await member.save();
+            }
+
+            // Update admin's groups
+            admin.groups.push(newGroup._id);
+            await admin.save();
+
+            // Emit success event with group details
+            socket.emit("groupCreated", { success: true, group: newGroup });
+        } catch (error) {
+            console.error('Error creating group:', error);
+            socket.emit("groupCreated", { success: false, error: error.message });
+        }
+    });
+
+    socket.on("getGroupById", async (groupId) => {
+        try {
+            const group = await Group.findById(groupId).populate('members'); // Populate the 'members' field
+
+            if (!group) {
+                socket.emit("groupById", { error: "Group not found" });
+                return;
+            }
+            // Emit the group details back to the client
+            socket.emit("groupById", { group });
+        } catch (error) {
+            console.error("Error getting group by ID:", error);
+            socket.emit("groupById", { error: "Error getting group by ID" });
+        }
+    });
+
     socket.on("getUsernameByEmail", async (email) => {
         try {
             // Find the user by email
@@ -184,6 +256,30 @@ io.on("connection", async (socket, next) => {
             socket.emit("contactList", { error: "Error getting contact list", contacts: [] });
         }
     });
+    socket.on("getUserGroups", async (userEmail) => {
+        try {
+            // Find the user by email and populate the 'groups' field, fully populating the 'admin' and 'members' fields of each group
+            const user = await User.findOne({ email: userEmail }).populate({
+                path: 'groups',
+                populate: {
+                    path: 'admin members'
+                }
+            });
+
+            if (!user) {
+                // If user not found, emit an error event or empty list
+                socket.emit("userGroups", { error: "User not found", groups: [] });
+                return;
+            }
+
+            // Emit the user's groups back to the client
+            socket.emit("userGroups", { groups: user.groups });
+        } catch (error) {
+            console.error("Error getting user groups:", error);
+            // Emit an error event if there's an error during database query
+            socket.emit("userGroups", { error: "Error getting user groups", groups: [] });
+        }
+    });
 
 
     socket.on("getHistory", async (payload) => {
@@ -211,7 +307,7 @@ io.on("connection", async (socket, next) => {
         try {
             console.log("Adding contact:", payload.contactEmail, "for user:", payload.email);
             const receipient = await User.findOne({ email: payload.contactEmail });
-          
+
             if (receipient) {
                 // If the user is found, update their contacts
                 const updatedUser = await User.findOneAndUpdate(
@@ -220,7 +316,7 @@ io.on("connection", async (socket, next) => {
                     { new: true } // Return the updated user document
                 );
 
-                socket.emit("success");
+                socket.emit("success", { contactEmail: payload.contactEmail });
             } else {
                 // If the user is not found, emit a "failed" event
                 console.log("User not found:", payload.email);
@@ -234,31 +330,53 @@ io.on("connection", async (socket, next) => {
 
 
     socket.on("send privateMessage", async (payload) => {
-        const receiverSocketId = emailToSocketIdMap.get(payload.receiver);
         try {
-            // Create message data object with sender, receiver, and message attributes
+
+          console.log("Sending group message:", payload);
+            const { email, receiver, message, Time, url, reply, type } = payload;
+          
             const messageData = {
-                sender: payload.email,
-                receiver: payload.receiver,
-                message: payload.message,
-                Time: payload.Time,
-                url: payload.url || null,
-                reply: payload.reply || null
+                sender: email,
+                receiver,
+                message,
+                Time,
+                url: url || null,
+                reply: reply || null,
+                type: type || 'private'
             };
-            const message = new Message(messageData);
+            const newMessage = new Message(messageData);
+            await newMessage.save();
+            if (type === 'group') {
+                // Handle group message
+                const group = await Group.findById(receiver).populate('members');
+                if (!group) {
+                    socket.emit("messageError", { success: false, error: "Group not found" });
+                    return;
+                }
 
-            // Save the message to MongoDB
-            await message.save();
-
-            // Emit message to recipient
-            if (receiverSocketId) {
-                socket.to(receiverSocketId).emit("private message", payload);
-                console.log("private message emitted to", payload.receiver);
+                // Emit the message to all group members
+                for (const member of group.members) {
+                    const receiverSocketId = emailToSocketIdMap.get(member.email);
+                    if (receiverSocketId) {
+                        const modifiedPayload = {
+                            ...payload,  
+                            email: receiver  
+                        };
+                        socket.to(receiverSocketId).emit("private message", modifiedPayload);
+                    }
+                }
             } else {
-                console.log("Receiver not found:", payload.receiver);
+                console.log("Sending private message:", messageData);
+                const receiverSocketId = emailToSocketIdMap.get(receiver);
+                if (receiverSocketId) {
+                    socket.to(receiverSocketId).emit("private message", payload);
+                }
             }
+
+            socket.emit("messageSent", { success: true });
         } catch (error) {
-            console.error('Error saving or emitting message:', error);
+            console.error('Error sending message:', error);
+            socket.emit("messageError", { success: false, error: error.message });
         }
     });
 
