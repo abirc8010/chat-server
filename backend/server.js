@@ -42,9 +42,9 @@ const groupSchema = new mongoose.Schema({
 const userSchema = new mongoose.Schema({
     email: String,
     username: String,
-    uid:{
-        type:String,
-        default:null
+    uid: {
+        type: String,
+        default: null
     },
     contacts: [String],
     profilePicture: {
@@ -113,6 +113,61 @@ io.on("connection", async (socket, next) => {
             console.error('Error storing user in database:', error);
         }
     }
+    // Add this event handler inside the io.on("connection", ...) block
+
+    socket.on("storeUid", async (data) => {
+        const { email, uid } = data;
+        try {
+            // Find the user by email
+            const user = await User.findOne({ email });
+
+            if (!user) {
+                // If user not found, emit a "failed" event
+                socket.emit("uidStored", { success: false, error: "User not found" });
+                return;
+            }
+
+            // Update the user's UID in the database
+            user.uid = uid;
+            await user.save();
+
+            // Emit success event
+            socket.emit("uidStored", { success: true });
+        } catch (error) {
+            console.error('Error storing UID:', error);
+            // Emit an error event if there's an error during database query
+            socket.emit("uidStored", { success: false, error: "Error storing UID" });
+        }
+    });
+
+    socket.on("uid", async (data) => {
+        const { userEmail, uid } = data;
+        console.log("Checking UID for user:", userEmail, uid);
+        try {
+            // Find the user by email
+            const user = await User.findOne({ email: userEmail });
+
+            if (!user) {
+                // If user not found, emit a "failed" event
+                socket.emit("uidResult", { success: false, error: "User not found" });
+                return;
+            }
+
+            // Compare UID with the one stored in the database
+            if (user.uid === uid || uid===null) {
+                // UID matches, emit success event
+                socket.emit("uidResult", { success: true });
+            } else {
+                // UID does not match, emit failure event
+                socket.emit("uidResult", { success: false, error: "UID does not match" });
+            }
+        } catch (error) {
+            console.error('Error finding user:', error);
+            // Emit an error event if there's an error during database query
+            socket.emit("uidResult", { success: false, error: "Error finding user" });
+        }
+    });
+
     socket.on("createGroup", async (data) => {
         try {
             const { groupName, adminEmail, memberEmails } = data;
@@ -336,9 +391,9 @@ io.on("connection", async (socket, next) => {
     socket.on("send privateMessage", async (payload) => {
         try {
 
-          console.log("Sending group message:", payload);
+            console.log("Sending group message:", payload);
             const { email, receiver, message, Time, url, reply, type } = payload;
-          
+
             const messageData = {
                 sender: email,
                 receiver,
@@ -363,8 +418,8 @@ io.on("connection", async (socket, next) => {
                     const receiverSocketId = emailToSocketIdMap.get(member.email);
                     if (receiverSocketId) {
                         const modifiedPayload = {
-                            ...payload,  
-                            email: receiver  
+                            ...payload,
+                            email: receiver
                         };
                         socket.to(receiverSocketId).emit("private message", modifiedPayload);
                     }
