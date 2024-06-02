@@ -321,9 +321,57 @@ io.on("connection", async (socket, next) => {
             socket.emit("contactList", { error: "Error getting contact list", contacts: [] });
         }
     });
+    socket.on("removeUserFromGroup", async (data) => {
+        const { userEmail, groupId } = data;
+
+        try {
+            // Find the user by email
+            const user = await User.findOne({ email: userEmail });
+
+            if (!user) {
+                // If user not found, emit an error event
+                socket.emit("userRemovedFromGroup", { success: false, error: "User not found" });
+                return;
+            }
+
+            // Find the group by ID
+            const group = await Group.findById(groupId);
+
+            if (!group) {
+                // If group not found, emit an error event
+                socket.emit("userRemovedFromGroup", { success: false, error: "Group not found" });
+                return;
+            }
+
+            // Check if the user is a member of the group
+            const userIndex = group.members.indexOf(user._id);
+
+            if (userIndex === -1) {
+                // If user is not a member of the group, emit an error event
+                socket.emit("userRemovedFromGroup", { success: false, error: "User is not a member of the group" });
+                return;
+            }
+
+            // Remove the user from the group
+            group.members.splice(userIndex, 1);
+            await group.save();
+
+            // Remove the group from the user's groups
+            const userGroupIndex = user.groups.indexOf(groupId);
+            user.groups.splice(userGroupIndex, 1);
+            await user.save();
+
+            // Emit success event with removed user email
+            socket.emit("userRemovedFromGroup", { success: true, removedUserEmail: user.email });
+        } catch (error) {
+            console.error('Error removing user from group:', error);
+            // Emit an error event if there's an error during database query
+            socket.emit("userRemovedFromGroup", { success: false, error: "Error removing user from group" });
+        }
+    });
+
     socket.on("getUserGroups", async (userEmail) => {
         try {
-            // Find the user by email and populate the 'groups' field, fully populating the 'admin' and 'members' fields of each group
             const user = await User.findOne({ email: userEmail }).populate({
                 path: 'groups',
                 populate: {
@@ -340,203 +388,212 @@ io.on("connection", async (socket, next) => {
             // Initialize an array to store group details
             const groupsWithNames = [];
 
-            // Iterate through user's groups to retrieve group names
+            // Iterate through user's groups to retrieve group names and member details
             for (const group of user.groups) {
-                // Find the group by its ID
-                const foundGroup = await Group.findById(group._id);
+                // Find the group by its ID and populate the 'members' field
+                const foundGroup = await Group.findById(group._id).populate('members');
+                const adminUser = await User.findById(foundGroup.admin);
 
-                // If the group is found, add its details to the array
                 if (foundGroup) {
+                    // Extract member details
+                    const members = foundGroup.members.map(member => ({
+                        email: member.email,
+                        profilePicture: member.profilePicture,
+                        username: member.username,
+                        isAdmin: (adminUser.email === member.email) || false
+                    }));
+                    console.log("FoundGroup: ", foundGroup);
                     groupsWithNames.push({
                         _id: foundGroup._id,
                         groupName: foundGroup.groupName,
-                        // Add other fields you need from the group object
+                        members: members,
+                        isAdmin: (adminUser.email === userEmail)
                     });
                 }
             }
 
-            // Emit the user's groups with their names back to the client
+            // Emit the user's groups with their names and member details back to the client
             socket.emit("userGroups", { groups: groupsWithNames });
         }
-        
-         catch (error) {
-        console.error("Error getting user groups:", error);
-        // Emit an error event if there's an error during database query
-        socket.emit("userGroups", { error: "Error getting user groups", groups: [] });
-    }
-});
-socket.on("getGroupChatHistory", async (userEmail) => {
-    try {
-        // Find the user by their email address
-        const user = await User.findOne({ email: userEmail });
 
-        if (!user) {
-            // If user not found, emit an error event or empty list
-            socket.emit("groupChatHistory", { error: "User not found", history: [] });
-            return;
+        catch (error) {
+            console.error("Error getting user groups:", error);
+            // Emit an error event if there's an error during database query
+            socket.emit("userGroups", { error: "Error getting user groups", groups: [] });
         }
+    });
+    socket.on("getGroupChatHistory", async (userEmail) => {
+        try {
+            // Find the user by their email address
+            const user = await User.findOne({ email: userEmail });
 
-        // Retrieve the groups associated with the user
-        const groups = await Group.find({ members: user._id });
-
-        if (!groups || groups.length === 0) {
-            // If user is not a member of any groups, emit an empty history list
-            socket.emit("groupChatHistory", { history: [] });
-            return;
-        }
-
-        // Initialize an array to store all group chat histories
-        const allGroupChatHistory = [];
-
-        // Iterate through each group to retrieve its chat history
-        for (const group of groups) {
-            const groupChatHistory = await getGroupChatHistory(group._id);
-            allGroupChatHistory.push({ groupId: group._id, history: groupChatHistory });
-        }
-
-        // Emit the group chat histories back to the client
-        socket.emit("groupChatHistory", { history: allGroupChatHistory });
-    } catch (error) {
-        console.error("Error getting group chat history:", error);
-        // Emit an error event if there's an error during database query
-        socket.emit("groupChatHistory", { error: "Error getting group chat history", history: [] });
-    }
-});
-
-
-// Function to retrieve group chat history by group ID
-async function getGroupChatHistory(groupId) {
-    try {
-
-        const history = await Message.find({ sender: groupId, type: 'group' }).sort({ timestamp: 1 });
-
-        return history;
-    } catch (error) {
-        console.error('Error retrieving group chat history:', error);
-        return [];
-    }
-}
-
-
-socket.on("getHistory", async (payload) => {
-    const email = payload.email;
-
-    try {
-        const user = await User.findOne({ email: email });
-        if (!user) {
-            console.log("User not found:", email);
-            return; // Exit early if user not found
-        }
-
-        // Iterate through user's contacts and retrieve conversation history for each contact
-        for (const contact of user.contacts) {
-            const messages = await getConversationHistory(email, contact);
-            // Emit history back to the user
-            socket.emit("history", { sender: email, receiver: contact, messages });
-        }
-    } catch (error) {
-        console.error('Error retrieving conversation history:', error);
-    }
-});
-
-socket.on("addContact", async (payload) => {
-    try {
-        console.log("Adding contact:", payload.contactEmail, "for user:", payload.email);
-        const receipient = await User.findOne({ email: payload.contactEmail });
-
-        if (receipient) {
-            // If the user is found, update their contacts
-            const updatedUser = await User.findOneAndUpdate(
-                { email: payload.email }, // Find the user by their email
-                { $addToSet: { contacts: payload.contactEmail } }, // Add the contact to the contacts array if not already present
-                { new: true } // Return the updated user document
-            );
-
-            socket.emit("success", { contactEmail: payload.contactEmail });
-        } else {
-            // If the user is not found, emit a "failed" event
-            console.log("User not found:", payload.email);
-            socket.emit("failed");
-        }
-    } catch (error) {
-        console.error('Error adding contact:', error);
-        socket.emit("failed");
-    }
-});
-
-
-socket.on("send privateMessage", async (payload) => {
-    try {
-        console.log("Sending group message:", payload);
-        const { email, receiver, message, Time, url, reply, type } = payload;
-
-        const messageData = {
-            sender: email,
-            receiver,
-            message,
-            Time,
-            url: url || null,
-            reply: reply || null,
-            type: type || 'private',
-            name: payload.name || null,
-        };
-        const newMessage = new Message(messageData);
-        await newMessage.save();
-        if (type === 'group') {
-            const user = await User.findOne({ email: receiver });
-            const group = await Group.findById(email).populate('members');
-            if (!group) {
-                socket.emit("messageError", { success: false, error: "Group not found" });
+            if (!user) {
+                // If user not found, emit an error event or empty list
+                socket.emit("groupChatHistory", { error: "User not found", history: [] });
                 return;
             }
 
-            // Emit the message to all group members
-            for (const member of group.members) {
-                const receiverSocketId = emailToSocketIdMap.get(member.email);
+            // Retrieve the groups associated with the user
+            const groups = await Group.find({ members: user._id });
 
+            if (!groups || groups.length === 0) {
+                // If user is not a member of any groups, emit an empty history list
+                socket.emit("groupChatHistory", { history: [] });
+                return;
+            }
+
+            // Initialize an array to store all group chat histories
+            const allGroupChatHistory = [];
+
+            // Iterate through each group to retrieve its chat history
+            for (const group of groups) {
+                const groupChatHistory = await getGroupChatHistory(group._id);
+                allGroupChatHistory.push({ groupId: group._id, history: groupChatHistory });
+            }
+
+            // Emit the group chat histories back to the client
+            socket.emit("groupChatHistory", { history: allGroupChatHistory });
+        } catch (error) {
+            console.error("Error getting group chat history:", error);
+            // Emit an error event if there's an error during database query
+            socket.emit("groupChatHistory", { error: "Error getting group chat history", history: [] });
+        }
+    });
+
+
+    // Function to retrieve group chat history by group ID
+    async function getGroupChatHistory(groupId) {
+        try {
+
+            const history = await Message.find({ sender: groupId, type: 'group' }).sort({ timestamp: 1 });
+
+            return history;
+        } catch (error) {
+            console.error('Error retrieving group chat history:', error);
+            return [];
+        }
+    }
+
+
+    socket.on("getHistory", async (payload) => {
+        const email = payload.email;
+
+        try {
+            const user = await User.findOne({ email: email });
+            if (!user) {
+                console.log("User not found:", email);
+                return; // Exit early if user not found
+            }
+
+            // Iterate through user's contacts and retrieve conversation history for each contact
+            for (const contact of user.contacts) {
+                const messages = await getConversationHistory(email, contact);
+                // Emit history back to the user
+                socket.emit("history", { sender: email, receiver: contact, messages });
+            }
+        } catch (error) {
+            console.error('Error retrieving conversation history:', error);
+        }
+    });
+
+    socket.on("addContact", async (payload) => {
+        try {
+            console.log("Adding contact:", payload.contactEmail, "for user:", payload.email);
+            const receipient = await User.findOne({ email: payload.contactEmail });
+
+            if (receipient) {
+                // If the user is found, update their contacts
+                const updatedUser = await User.findOneAndUpdate(
+                    { email: payload.email }, // Find the user by their email
+                    { $addToSet: { contacts: payload.contactEmail } }, // Add the contact to the contacts array if not already present
+                    { new: true } // Return the updated user document
+                );
+
+                socket.emit("success", { contactEmail: payload.contactEmail });
+            } else {
+                // If the user is not found, emit a "failed" event
+                console.log("User not found:", payload.email);
+                socket.emit("failed");
+            }
+        } catch (error) {
+            console.error('Error adding contact:', error);
+            socket.emit("failed");
+        }
+    });
+
+
+    socket.on("send privateMessage", async (payload) => {
+        try {
+            console.log("Sending group message:", payload);
+            const { email, receiver, message, Time, url, reply, type } = payload;
+
+            const messageData = {
+                sender: email,
+                receiver,
+                message,
+                Time,
+                url: url || null,
+                reply: reply || null,
+                type: type || 'private',
+                name: payload.name || null,
+            };
+            const newMessage = new Message(messageData);
+            await newMessage.save();
+            if (type === 'group') {
+                const user = await User.findOne({ email: receiver });
+                const group = await Group.findById(email).populate('members');
+                if (!group) {
+                    socket.emit("messageError", { success: false, error: "Group not found" });
+                    return;
+                }
+
+                // Emit the message to all group members
+                for (const member of group.members) {
+                    const receiverSocketId = emailToSocketIdMap.get(member.email);
+
+                    if (receiverSocketId) {
+                        const modifiedPayload = {
+                            ...payload,
+                            group: group.groupName,
+                            name: user.username
+                        };
+                        socket.to(receiverSocketId).emit("private message", modifiedPayload);
+                    }
+                }
+            } else {
+                console.log("Sending private message:", messageData);
+                const receiverSocketId = emailToSocketIdMap.get(receiver);
                 if (receiverSocketId) {
-                    const modifiedPayload = {
-                        ...payload,
-                        group: group.groupName,
-                        name: user.username
-                    };
-                    socket.to(receiverSocketId).emit("private message", modifiedPayload);
+                    socket.to(receiverSocketId).emit("private message", payload);
                 }
             }
-        } else {
-            console.log("Sending private message:", messageData);
-            const receiverSocketId = emailToSocketIdMap.get(receiver);
-            if (receiverSocketId) {
-                socket.to(receiverSocketId).emit("private message", payload);
-            }
+
+            socket.emit("messageSent", { success: true });
+        } catch (error) {
+            console.error('Error sending message:', error);
+            socket.emit("messageError", { success: false, error: error.message });
         }
+    });
 
-        socket.emit("messageSent", { success: true });
-    } catch (error) {
-        console.error('Error sending message:', error);
-        socket.emit("messageError", { success: false, error: error.message });
-    }
-});
+    socket.on("chat", (payload) => {
+        io.emit("chat", payload);
+    });
 
-socket.on("chat", (payload) => {
-    io.emit("chat", payload);
-});
+    socket.on("typing", (data) => {
+        const receiverSocketId = emailToSocketIdMap.get(data.receiver);
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("notifyTyping", data);
+        }
+        socket.broadcast.emit("notifyTyping", data);
+    });
 
-socket.on("typing", (data) => {
-    const receiverSocketId = emailToSocketIdMap.get(data.receiver);
-    if (receiverSocketId) {
-        io.to(receiverSocketId).emit("notifyTyping", data);
-    }
-    socket.broadcast.emit("notifyTyping", data);
-});
+    socket.on("disconnect", () => {
+        console.log("User disconnected");
+    });
 
-socket.on("disconnect", () => {
-    console.log("User disconnected");
-});
-
-socket.on("stopTyping", () => {
-    socket.broadcast.emit("notifyStopTyping");
-});
+    socket.on("stopTyping", () => {
+        socket.broadcast.emit("notifyStopTyping");
+    });
 });
 
 server.listen(5000, () => {
