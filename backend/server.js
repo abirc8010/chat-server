@@ -94,14 +94,17 @@ const Message = mongoose.model('Message', messageSchema);
 
 const Group = mongoose.model('Group', groupSchema);
 const emailToSocketIdMap = new Map();
-
+const onlineUsers = new Set();
 io.on("connection", async (socket, next) => {
     const email = socket.handshake.auth.email;
     const username = socket.handshake.auth.current_username;
     const useruid = socket.handshake.auth.uid;
+
     if (email && username) {
         console.log("User connected:", email, username);
         emailToSocketIdMap.set(email, socket.id);
+        onlineUsers.add(email);
+        io.emit("userOnlineStatus", { email, status: "online" });
         console.log(emailToSocketIdMap);
         try {
             let user = await User.findOne({ email: email, username });
@@ -586,9 +589,25 @@ io.on("connection", async (socket, next) => {
         }
         socket.broadcast.emit("notifyTyping", data);
     });
+    socket.on('fetchContactsStatus', (contacts, callback) => {
+        console.log("Fetching contacts status:", contacts);
+        const statuses = contacts.map(email => ({
+            email: email,
+            status: onlineUsers.has(email) ? 'online' : 'offline'
+        }));
+        callback(statuses);
+    });
 
+    socket.on("userOnlineStatus", (data) => {
+        const { email, status } = data;
+        console.log(`User ${email} is now ${status}`);
+        // Update the UI or perform any other actions based on the user's online status
+    });
     socket.on("disconnect", () => {
         console.log("User disconnected");
+        onlineUsers.delete(email); // Remove user from online users set
+        io.emit("userOnlineStatus", { email, status: "offline" }); // Emit event for user offline status
+
     });
 
     socket.on("stopTyping", () => {
