@@ -101,11 +101,11 @@ io.on("connection", async (socket, next) => {
     const useruid = socket.handshake.auth.uid;
 
     if (email && username) {
-        console.log("User connected:", email, username);
+   
         emailToSocketIdMap.set(email, socket.id);
         onlineUsers.add(email);
         io.emit("userOnlineStatus", { email, status: "online" });
-        console.log(emailToSocketIdMap);
+     
         try {
             let user = await User.findOne({ email: email, username });
             if (!user) {
@@ -151,7 +151,7 @@ io.on("connection", async (socket, next) => {
 
     socket.on("uid", async (data) => {
         const { userEmail, uid } = data;
-        console.log("Checking UID for user:", userEmail, uid);
+       
         try {
             // Find the user by email
             const user = await User.findOne({ email: userEmail });
@@ -183,13 +183,13 @@ io.on("connection", async (socket, next) => {
 
             const admin = await User.findOne({ email: adminEmail });
             const members = await User.find({ email: { $in: memberEmails } });
-            console.log(members);
+
             const newGroup = new Group({
                 groupName: groupName,
                 admin: admin._id,
                 members: [admin._id, ...members.map(member => member._id)]
             });
-            console.log("New group:", newGroup);
+
             await newGroup.save();
             for (const member of members) {
                 member.groups.push(newGroup._id);
@@ -233,7 +233,7 @@ io.on("connection", async (socket, next) => {
                 socket.emit("usernameByEmail", { error: "User not found" });
                 return;
             }
-            console.log("getting username by email:", email);
+         
             // Emit the user's username to the client
             socket.emit("usernameByEmail", { username: user.username });
         } catch (error) {
@@ -249,7 +249,6 @@ io.on("connection", async (socket, next) => {
             // Find the user by email
             const user = await User.findOne({ email });
 
-            console.log("Getting profile picture for user:", user);
             if (!user) {
                 // If user not found, emit an error event or empty response
                 socket.emit("Picture", { error: "User not found" });
@@ -267,7 +266,7 @@ io.on("connection", async (socket, next) => {
 
     socket.on("getUserProfilePicture", async (data) => {
         const email = data.email;
-        console.log("Current profile pic:", email);
+
         try {
             // Find the user by email
             const user = await User.findOne({ email });
@@ -290,14 +289,14 @@ io.on("connection", async (socket, next) => {
     socket.on("uploadProfilePicture", async (data) => {
         const email = data.email;
         const fileData = data.fileData; // Base64 encoded image data
-        console.log("trigerred");
+  
         try {
             const imageUrl = await uploadProfilePicture(email, fileData);
-            console.log('Profile picture uploaded and updated for user:', imageUrl);
+   
             // Update the user's profile picture URL in the database with the Cloudinary URL
             await User.findOneAndUpdate({ email: email }, { profilePicture: imageUrl });
 
-            console.log('Profile picture uploaded and updated for user:', email);
+
             socket.emit("profilePictureUploaded", { success: true });
         } catch (error) {
             console.error('Error uploading profile picture:', error);
@@ -405,7 +404,7 @@ io.on("connection", async (socket, next) => {
                         username: member.username,
                         isAdmin: (adminUser.email === member.email) || false
                     }));
-                    console.log("FoundGroup: ", foundGroup);
+                   
                     groupsWithNames.push({
                         _id: foundGroup._id,
                         groupName: foundGroup.groupName,
@@ -501,7 +500,6 @@ io.on("connection", async (socket, next) => {
 
     socket.on("addContact", async (payload) => {
         try {
-            console.log("Adding contact:", payload.contactEmail, "for user:", payload.email);
             const receipient = await User.findOne({ email: payload.contactEmail });
 
             if (receipient) {
@@ -512,7 +510,7 @@ io.on("connection", async (socket, next) => {
                     { new: true } // Return the updated user document
                 );
 
-                socket.emit("success", { contactEmail: payload.contactEmail });
+                socket.emit("success", {username:receipient.username,profilepicture:receipient.profilePicture, contactEmail: payload.contactEmail });
             } else {
                 // If the user is not found, emit a "failed" event
                 console.log("User not found:", payload.email);
@@ -526,8 +524,8 @@ io.on("connection", async (socket, next) => {
 
 
     socket.on("send privateMessage", async (payload) => {
+        
         try {
-            console.log("Sending group message:", payload);
             const { email, receiver, message, Time, url, reply, type } = payload;
 
             const messageData = {
@@ -564,10 +562,16 @@ io.on("connection", async (socket, next) => {
                     }
                 }
             } else {
-                console.log("Sending private message:", messageData);
+              
                 const receiverSocketId = emailToSocketIdMap.get(receiver);
+                const user = await User.findOne({ email });
+                console.log("username", user.username);
+                const modifiedPayload = {
+                       ...payload,
+                          name: user.username
+                }
                 if (receiverSocketId) {
-                    socket.to(receiverSocketId).emit("private message", payload);
+                    socket.to(receiverSocketId).emit("private message", modifiedPayload);
                 }
             }
 
@@ -584,13 +588,13 @@ io.on("connection", async (socket, next) => {
 
     socket.on("typing", (data) => {
         const receiverSocketId = emailToSocketIdMap.get(data.receiver);
+        
         if (receiverSocketId) {
-            io.to(receiverSocketId).emit("notifyTyping", data);
+            socket.to(receiverSocketId).emit("notifyTyping", data);
         }
-        socket.broadcast.emit("notifyTyping", data);
     });
     socket.on('fetchContactsStatus', (contacts, callback) => {
-        console.log("Fetching contacts status:", contacts);
+     
         const statuses = contacts.map(email => ({
             email: email,
             status: onlineUsers.has(email) ? 'online' : 'offline'
@@ -598,13 +602,8 @@ io.on("connection", async (socket, next) => {
         callback(statuses);
     });
 
-    socket.on("userOnlineStatus", (data) => {
-        const { email, status } = data;
-        console.log(`User ${email} is now ${status}`);
-        // Update the UI or perform any other actions based on the user's online status
-    });
     socket.on("disconnect", () => {
-        console.log("User disconnected");
+    
         onlineUsers.delete(email); // Remove user from online users set
         io.emit("userOnlineStatus", { email, status: "offline" }); // Emit event for user offline status
 
