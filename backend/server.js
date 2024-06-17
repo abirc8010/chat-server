@@ -101,11 +101,11 @@ io.on("connection", async (socket, next) => {
     const useruid = socket.handshake.auth.uid;
 
     if (email && username) {
-   
+
         emailToSocketIdMap.set(email, socket.id);
         onlineUsers.add(email);
         io.emit("userOnlineStatus", { email, status: "online" });
-     
+
         try {
             let user = await User.findOne({ email: email, username });
             if (!user) {
@@ -151,7 +151,7 @@ io.on("connection", async (socket, next) => {
 
     socket.on("uid", async (data) => {
         const { userEmail, uid } = data;
-       
+
         try {
             // Find the user by email
             const user = await User.findOne({ email: userEmail });
@@ -233,7 +233,7 @@ io.on("connection", async (socket, next) => {
                 socket.emit("usernameByEmail", { error: "User not found" });
                 return;
             }
-         
+
             // Emit the user's username to the client
             socket.emit("usernameByEmail", { username: user.username });
         } catch (error) {
@@ -289,10 +289,10 @@ io.on("connection", async (socket, next) => {
     socket.on("uploadProfilePicture", async (data) => {
         const email = data.email;
         const fileData = data.fileData; // Base64 encoded image data
-  
+
         try {
             const imageUrl = await uploadProfilePicture(email, fileData);
-   
+
             // Update the user's profile picture URL in the database with the Cloudinary URL
             await User.findOneAndUpdate({ email: email }, { profilePicture: imageUrl });
 
@@ -303,6 +303,68 @@ io.on("connection", async (socket, next) => {
             socket.emit("profilePictureUploaded", { success: false, error: error.message });
         }
     });
+
+    socket.on("edit", async (data) => {
+        const {payload,receiver,selectedIndex}=data;
+        try {
+            let message;
+
+            // Check if the payload has an _id attribute
+            if (payload._id) {
+                // If _id exists, search by _id
+                message = await Message.findById(payload._id);
+            } else {
+                console.log("Payload: ", payload);
+                message = await Message.findOne({
+                    sender: payload.email,
+                    receiver: receiver,
+                    Time: payload.Time
+                });
+            }
+            if (!message) {
+                socket.emit('edit_failed', { error: 'Message not found' });
+                console.log("Message not found");
+                return;
+            }
+
+            // Check if the message has already been edited
+            if (message.Time.includes("Edited")) {
+                socket.emit('edit_failed', { error: 'Message already edited' });
+                console.log("Message already edited");
+                return;
+            }
+
+            const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+            if (message.timestamp < fifteenMinutesAgo) {
+                socket.emit('edit_failed', { error: 'Message timestamp is too old' });
+                console.log("Message timestamp is too old");
+                return;
+            }
+
+            message.message = payload.message;
+            const previousTime = message.Time;
+            message.Time = "Edited: " + previousTime;
+            message.edited = true;
+            await message.save();
+
+            socket.emit('edit_success', { message: payload.message ,selectedIndex,receiver});
+
+            // Check if the message type is "private"
+            if (payload.type === "private") {
+                const receiverSocketId = emailToSocketIdMap.get(payload.receiver);
+                console.log("Receiver: ", receiverSocketId);
+                if (receiverSocketId) {
+                   console.log("Sending to ",payload);
+                    socket.to(receiverSocketId).emit('edit_success', { message: payload.message ,selectedIndex,receiver});
+                }
+            }
+        } catch (error) {
+            console.error('Error editing message:', error);
+            socket.emit('edit_failed', { error: 'An error occurred while editing the message' });
+        }
+    });
+
+
 
     socket.on("getContactList", async (email) => {
         try {
@@ -404,7 +466,7 @@ io.on("connection", async (socket, next) => {
                         username: member.username,
                         isAdmin: (adminUser.email === member.email) || false
                     }));
-                   
+
                     groupsWithNames.push({
                         _id: foundGroup._id,
                         groupName: foundGroup.groupName,
@@ -510,7 +572,7 @@ io.on("connection", async (socket, next) => {
                     { new: true } // Return the updated user document
                 );
 
-                socket.emit("success", {username:receipient.username,profilepicture:receipient.profilePicture, contactEmail: payload.contactEmail });
+                socket.emit("success", { username: receipient.username, profilepicture: receipient.profilePicture, contactEmail: payload.contactEmail });
             } else {
                 // If the user is not found, emit a "failed" event
                 console.log("User not found:", payload.email);
@@ -524,7 +586,7 @@ io.on("connection", async (socket, next) => {
 
 
     socket.on("send privateMessage", async (payload) => {
-        
+
         try {
             const { email, receiver, message, Time, url, reply, type } = payload;
 
@@ -562,13 +624,13 @@ io.on("connection", async (socket, next) => {
                     }
                 }
             } else {
-              
+
                 const receiverSocketId = emailToSocketIdMap.get(receiver);
                 const user = await User.findOne({ email });
                 console.log("username", user.username);
                 const modifiedPayload = {
-                       ...payload,
-                          name: user.username
+                    ...payload,
+                    name: user.username
                 }
                 if (receiverSocketId) {
                     socket.to(receiverSocketId).emit("private message", modifiedPayload);
@@ -588,13 +650,13 @@ io.on("connection", async (socket, next) => {
 
     socket.on("typing", (data) => {
         const receiverSocketId = emailToSocketIdMap.get(data.receiver);
-        
+
         if (receiverSocketId) {
             socket.to(receiverSocketId).emit("notifyTyping", data);
         }
     });
     socket.on('fetchContactsStatus', (contacts, callback) => {
-     
+
         const statuses = contacts.map(email => ({
             email: email,
             status: onlineUsers.has(email) ? 'online' : 'offline'
@@ -603,7 +665,7 @@ io.on("connection", async (socket, next) => {
     });
 
     socket.on("disconnect", () => {
-    
+
         onlineUsers.delete(email); // Remove user from online users set
         io.emit("userOnlineStatus", { email, status: "offline" }); // Emit event for user offline status
 
