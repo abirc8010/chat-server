@@ -1,5 +1,6 @@
 import httpStatus from 'http-status';
 import { User } from '../models/users.models.js'; 
+import { Message } from '../models/messages.models.js';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 
@@ -114,7 +115,7 @@ const getContacts = async (req, res) => {
     try {
         const { email } = req.query;  
         const user = await User.findOne({ email }).populate('contacts', 'username email profilePicture');
-        console.log(email);
+       
         if (!user) {
             return res.status(httpStatus.NOT_FOUND).json({ message: 'User not found' });
         }
@@ -159,4 +160,33 @@ const addContact= async (req, res) => {
     }
 
 }
-export { login, register,validateToken,getContacts,addContact }
+
+const getMessagesBetweenUsers = async (req, res) => {
+    const { senderEmail, receiverEmail } = req.query;
+
+    if (!senderEmail || !receiverEmail) {
+        return res.status(httpStatus.BAD_REQUEST).json({ message: 'Sender and receiver emails are required.' });
+    }
+
+    try {
+        const sender = await User.findOne({ email: senderEmail });
+        const receiver = await User.findOne({ email: receiverEmail });
+
+        if (!sender || !receiver) {
+            return res.status(httpStatus.NOT_FOUND).json({ message: 'User not found.' });
+        }
+        const messages = await Message.find({
+            $or: [
+                { sender: sender._id, receiver: { type: 'User', id: receiver._id } },
+                { sender: receiver._id, receiver: { type: 'User', id: sender._id } },
+            ],
+        }).populate('sender', 'email username') 
+          .populate('receiver.id', 'email username'); 
+
+        return res.status(httpStatus.OK).json(messages);
+    } catch (error) {
+        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: `Error fetching messages: ${error.message}` });
+    }
+};
+
+export { login, register,validateToken,getContacts,addContact, getMessagesBetweenUsers };
