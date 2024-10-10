@@ -7,14 +7,15 @@ const messageSchema = new mongoose.Schema({
         required: true, 
     },
     receiver: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', 
-        required: false, 
-    },
-    group: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Group', 
-        required: false,
+        type: {
+            type: String,
+            enum: ['User', 'Group'],
+            required: true,
+        },
+        id: {
+            type: mongoose.Schema.Types.ObjectId,
+            required: true,
+        }
     },
     content: {
         type: String,
@@ -53,4 +54,5 @@ const messageSchema = new mongoose.Schema({
     timestamps: true, 
 });
 
-module.exports = mongoose.model('Message', messageSchema);
+const Message= mongoose.model('Message', messageSchema);
+export { Message };
