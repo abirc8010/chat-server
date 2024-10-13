@@ -1,44 +1,50 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const groupSchema = new mongoose.Schema({
+const groupSchema = new mongoose.Schema(
+  {
     groupName: {
-        type: String,
-        required: true, 
-        trim: true, 
+      type: String,
+      required: true,
+      trim: true,
     },
     groupPicture: {
-        type: String,
-        default: 'default_group_picture.webp', 
+      type: String,
+      default: "default_group_picture.webp",
     },
     description: {
-        type: String,
-        default: null, 
+      type: String,
+      default: null,
     },
     admin: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', 
-        required: true, 
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-    members: [{
+    members: [
+      {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        default: [], 
-    }],
+        ref: "User",
+        default: [],
+      },
+    ],
     createdAt: {
-        type: Date,
-        default: Date.now, 
- },
-    updatedAt: {
-        type: Date,
-        default: Date.now, 
+      type: Date,
+      default: Date.now,
     },
-}, {
-    timestamps: true, 
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+groupSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
 });
 
-groupSchema.pre('save', function(next) {
-    this.updatedAt = Date.now();
-    next();
-});
-
-module.exports = mongoose.model('Group', groupSchema);
+const Groups = mongoose.model("Group", groupSchema);
+export { Groups };

@@ -1,58 +1,59 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const messageSchema = new mongoose.Schema({
+const messageSchema = new mongoose.Schema(
+  {
     sender: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true, 
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
     receiver: {
-        type: {
-            type: String,
-            enum: ['User', 'Group'],
-            required: true,
-        },
-        id: {
-            type: mongoose.Schema.Types.ObjectId,
-            required: true,
-        }
+      type: {
+        type: String,
+        enum: ["User", "Group"],
+        required: true,
+      },
+      id: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+      },
     },
     content: {
-        type: String,
-        required: true, 
+      type: String,
+      required: true,
     },
     timestamp: {
-        type: Date,
-        default: Date.now, 
+      type: Date,
+      default: Date.now,
     },
     mediaUrl: {
-        type: String,
-        default: null,
+      type: String,
+      default: null,
     },
     replyTo: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Message', 
-        default: null,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
     },
-    mentions: [{
+    mentions: [
+      {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', 
-        default: [], 
-    }],
-    readBy: [{
+        ref: "User",
+        default: [],
+      },
+    ],
+    readBy: [
+      {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', 
-        default: [], 
-    }],
-    type: {
-        type: String,
-        enum: ['private', 'group'], 
-        required: true,
-        default: 'private', 
-    },
-}, {
-    timestamps: true, 
-});
+        ref: "User",
+        default: [],
+      },
+    ],
+  },
+  {
+    timestamps: true,
+  }
+);
 
-const Message= mongoose.model('Message', messageSchema);
+const Message = mongoose.model("Message", messageSchema);
 export { Message };

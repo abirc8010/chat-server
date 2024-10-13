@@ -1,6 +1,7 @@
 import httpStatus from "http-status";
 import { User } from "../models/users.models.js";
 import { Message } from "../models/messages.models.js";
+import { Groups } from "../models/groups.models.js";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 
@@ -32,6 +33,7 @@ const login = async (req, res) => {
         message: "Login successful",
         token: token,
         user: {
+          _id: user._id,
           username: user.username,
           email: user.email,
           profilePicture: user.profilePicture,
@@ -109,6 +111,7 @@ const validateToken = async (req, res) => {
       return res.status(httpStatus.OK).json({
         message: "Token is valid",
         user: {
+          _id: user._id,
           username: user.username,
           email: user.email,
           profilePicture: user.profilePicture,
@@ -130,10 +133,9 @@ const validateToken = async (req, res) => {
 const getContacts = async (req, res) => {
   try {
     const { email } = req.query;
-    const user = await User.findOne({ email }).populate(
-      "contacts",
-      "username email profilePicture"
-    );
+    const user = await User.findOne({ email })
+      .populate("contacts", "_id username email profilePicture")
+      .populate("groups", "_id groupName groupPicture");
 
     if (!user) {
       return res
@@ -141,7 +143,20 @@ const getContacts = async (req, res) => {
         .json({ message: "User not found" });
     }
 
-    return res.status(httpStatus.OK).json({ contacts: user.contacts });
+    const contactsWithType = user.contacts.map((contact) => ({
+      ...contact.toObject(),
+      type: "Private",
+    }));
+
+    const groupsWithType = user.groups.map((group) => ({
+      ...group.toObject(),
+      type: "Group",
+    }));
+
+    return res.status(httpStatus.OK).json({
+      contacts: contactsWithType,
+      groups: groupsWithType,
+    });
   } catch (error) {
     return res
       .status(httpStatus.INTERNAL_SERVER_ERROR)
@@ -191,34 +206,46 @@ const addContact = async (req, res) => {
   }
 };
 
-const getMessagesBetweenUsers = async (req, res) => {
-  const { senderEmail, receiverEmail } = req.query;
-
-  if (!senderEmail || !receiverEmail) {
-    return res
-      .status(httpStatus.BAD_REQUEST)
-      .json({ message: "Sender and receiver emails are required." });
+const getMessages = async (req, res) => {
+  const { senderEmail, receiverEmail, groupId } = req.query;
+  console.log(senderEmail, receiverEmail, groupId);
+  if (!senderEmail && !receiverEmail && !groupId) {
+    return res.status(httpStatus.BAD_REQUEST).json({
+      message: "Either sender and receiver emails or group ID are required.",
+    });
   }
 
   try {
-    const sender = await User.findOne({ email: senderEmail });
-    const receiver = await User.findOne({ email: receiverEmail });
+    if (groupId) {
+      const messages = await Message.find({
+        "receiver.type": "Group",
+        "receiver.id": groupId,
+      })
+        .populate("sender", "email username")
+        .populate("receiver.id", "name");
 
-    if (!sender || !receiver) {
-      return res
-        .status(httpStatus.NOT_FOUND)
-        .json({ message: "User not found." });
+      return res.status(httpStatus.OK).json(messages);
+    } else {
+      const sender = await User.findOne({ email: senderEmail });
+      const receiver = await User.findOne({ email: receiverEmail });
+
+      if (!sender || !receiver) {
+        return res
+          .status(httpStatus.NOT_FOUND)
+          .json({ message: "User not found." });
+      }
+
+      const messages = await Message.find({
+        $or: [
+          { sender: sender._id, receiver: { type: "User", id: receiver._id } },
+          { sender: receiver._id, receiver: { type: "User", id: sender._id } },
+        ],
+      })
+        .populate("sender", "email username")
+        .populate("receiver.id", "email username");
+
+      return res.status(httpStatus.OK).json(messages);
     }
-    const messages = await Message.find({
-      $or: [
-        { sender: sender._id, receiver: { type: "User", id: receiver._id } },
-        { sender: receiver._id, receiver: { type: "User", id: sender._id } },
-      ],
-    })
-      .populate("sender", "email username")
-      .populate("receiver.id", "email username");
-
-    return res.status(httpStatus.OK).json(messages);
   } catch (error) {
     return res
       .status(httpStatus.INTERNAL_SERVER_ERROR)
@@ -244,12 +271,82 @@ const getSearchResults = async (req, res) => {
   }
 };
 
+const changeProfilePicture = async (req, res) => {
+  const { id } = req.params;
+  const { profilePicture } = req.body;
+
+  if (!profilePicture) {
+    return res
+      .status(httpStatus.BAD_REQUEST)
+      .json({ message: "Profile picture is required." });
+  }
+
+  try {
+    const user = await User.findById(id);
+
+    if (!user) {
+      return res
+        .status(httpStatus.NOT_FOUND)
+        .json({ message: "User not found." });
+    }
+
+    user.profilePicture = profilePicture;
+    await user.save();
+
+    return res.status(httpStatus.OK).json({
+      message: "Profile picture updated successfully.",
+      profilePicture: user.profilePicture,
+    });
+  } catch (error) {
+    return res
+      .status(httpStatus.INTERNAL_SERVER_ERROR)
+      .json({ message: `Error updating profile picture: ${error.message}` });
+  }
+};
+
+const getGroupMembers = async (req, res) => {
+  const { groupId } = req.params;
+
+  if (!groupId) {
+    return res
+      .status(httpStatus.BAD_REQUEST)
+      .json({ message: "Group ID is required." });
+  }
+
+  try {
+    const group = await Groups.findById(groupId).populate(
+      "members",
+      "_id username email profilePicture"
+    );
+
+    if (!group) {
+      return res
+        .status(httpStatus.NOT_FOUND)
+        .json({ message: "Group not found." });
+    }
+
+    const members = group.members.map((member) => ({
+      _id: member._id,
+      username: member.username,
+      email: member.email,
+      profilePicture: member.profilePicture,
+    }));
+
+    return res.status(httpStatus.OK).json({ members });
+  } catch (error) {
+    return res
+      .status(httpStatus.INTERNAL_SERVER_ERROR)
+      .json({ message: `Error fetching group members: ${error.message}` });
+  }
+};
 export {
   login,
   register,
   validateToken,
   getContacts,
   addContact,
-  getMessagesBetweenUsers,
+  getMessages,
   getSearchResults,
+  changeProfilePicture,
+  getGroupMembers,
 };
