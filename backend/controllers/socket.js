@@ -97,13 +97,23 @@ export const initializeSocket = (server) => {
     });
 
     socket.on("sendMessage", async (messageData) => {
-      const { senderEmail, receiverEmail, content, mediaUrl, groupId } =
-        messageData;
+      const {
+        senderEmail,
+        receiverEmail,
+        content,
+        mediaUrl,
+        groupId,
+        replyTo,
+      } = messageData;
+      console.log("Received message: ", messageData);
       console.log(senderEmail, receiverEmail, content, groupId);
       try {
         const sender = await User.findOne({ email: senderEmail });
         let newMessage;
-
+        let replymessage = null;
+        if (replyTo) {
+          replymessage = await Message.findById(replyTo);
+        }
         if (groupId) {
           const groupMembers = await Groups.findById(groupId).populate(
             "members"
@@ -116,9 +126,13 @@ export const initializeSocket = (server) => {
             },
             content,
             mediaUrl,
+            replyTo: replymessage
+              ? { _id: replymessage._id, content: replymessage.content }
+              : null,
           });
 
           const savedMessage = await newMessage.save();
+          console.log("saved message", savedMessage);
           groupMembers.members.forEach((member) => {
             const memberSocketId = userSocketMap.get(member.email);
             if (memberSocketId) {
@@ -135,6 +149,9 @@ export const initializeSocket = (server) => {
             },
             content,
             mediaUrl,
+            replyTo: replymessage
+              ? { _id: replymessage._id, content: replymessage.content }
+              : null,
           });
 
           const savedMessage = await newMessage.save();
