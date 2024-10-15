@@ -222,8 +222,8 @@ const getMessages = async (req, res) => {
         "receiver.id": groupId,
       })
         .populate("sender", "email username")
-        .populate("receiver.id", "name");
-
+        .populate("receiver.id", "name")
+        .populate("replyTo", "content");
       return res.status(httpStatus.OK).json(messages);
     } else {
       const sender = await User.findOne({ email: senderEmail });

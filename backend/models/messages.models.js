@@ -31,9 +31,13 @@ const messageSchema = new mongoose.Schema(
       default: null,
     },
     replyTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Message",
-      default: null,
+      _id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message",
+      },
+      content: {
+        type: String,
+      },
     },
     mentions: [
       {
