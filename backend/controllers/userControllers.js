@@ -208,7 +208,6 @@ const addContact = async (req, res) => {
 
 const getMessages = async (req, res) => {
   const { senderEmail, receiverEmail, groupId } = req.query;
-  console.log(senderEmail, receiverEmail, groupId);
   if (!senderEmail && !receiverEmail && !groupId) {
     return res.status(httpStatus.BAD_REQUEST).json({
       message: "Either sender and receiver emails or group ID are required.",
@@ -331,8 +330,7 @@ const getGroupMembers = async (req, res) => {
       email: member.email,
       profilePicture: member.profilePicture,
     }));
-
-    return res.status(httpStatus.OK).json({ members });
+    return res.status(httpStatus.OK).json({ members, admin: group.admin });
   } catch (error) {
     return res
       .status(httpStatus.INTERNAL_SERVER_ERROR)
