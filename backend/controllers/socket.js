@@ -21,7 +21,6 @@ export const initializeSocket = (server) => {
       try {
         const adder = await User.findOne({ email: adderEmail });
         const added = await User.findOne({ email: addedEmail });
-
         if (!adder || !added) {
           return socket.emit("error", "User not found");
         }
@@ -105,8 +104,6 @@ export const initializeSocket = (server) => {
         groupId,
         replyTo,
       } = messageData;
-      console.log("Received message: ", messageData);
-      console.log(senderEmail, receiverEmail, content, groupId);
       try {
         const sender = await User.findOne({ email: senderEmail });
         let newMessage;
@@ -132,7 +129,6 @@ export const initializeSocket = (server) => {
           });
 
           const savedMessage = await newMessage.save();
-          console.log("saved message", savedMessage);
           groupMembers.members.forEach((member) => {
             const memberSocketId = userSocketMap.get(member.email);
             if (memberSocketId) {
@@ -157,7 +153,7 @@ export const initializeSocket = (server) => {
           const savedMessage = await newMessage.save();
           const senderSocketId = userSocketMap.get(senderEmail);
           const receiverSocketId = userSocketMap.get(receiverEmail);
-          console.log("Sending message ");
+
           if (senderSocketId) {
             io.to(senderSocketId).emit("receiveMessage", savedMessage);
           }
