@@ -4,6 +4,33 @@ import { Message } from "../models/messages.models.js";
 import { Groups } from "../models/groups.models.js";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
+const getLatestMessage = async (userId, receiverId) => {
+  try {
+    let messages;
+
+    if (!userId) {
+      messages = await Message.find({
+        "receiver.id": receiverId,
+      })
+        .sort({ timestamp: -1 })
+        .limit(1);
+    } else {
+      messages = await Message.find({
+        $or: [
+          { sender: userId, "receiver.id": receiverId },
+          { sender: receiverId, "receiver.id": userId },
+        ],
+      })
+        .sort({ timestamp: -1 })
+        .limit(1);
+    }
+    return messages;
+  } catch (error) {
+    throw new Error(`Error fetching messages: ${error.message}`);
+  }
+};
+
+export { getLatestMessage };
 
 const login = async (req, res) => {
   const { email, password } = req.body;
@@ -143,15 +170,27 @@ const getContacts = async (req, res) => {
         .json({ message: "User not found" });
     }
 
-    const contactsWithType = user.contacts.map((contact) => ({
-      ...contact.toObject(),
-      type: "Private",
-    }));
+    const contactsWithType = await Promise.all(
+      user.contacts.map(async (contact) => {
+        const latestMessage = await getLatestMessage(user._id, contact.id);
+        return {
+          ...contact.toObject(),
+          type: "Private",
+          latestMessage: latestMessage || null,
+        };
+      })
+    );
 
-    const groupsWithType = user.groups.map((group) => ({
-      ...group.toObject(),
-      type: "Group",
-    }));
+    const groupsWithType = await Promise.all(
+      user.groups.map(async (group) => {
+        const latestMessage = await getLatestMessage(null, group._id);
+        return {
+          ...group.toObject(),
+          type: "Group",
+          latestMessage: latestMessage || null,
+        };
+      })
+    );
 
     return res.status(httpStatus.OK).json({
       contacts: contactsWithType,
@@ -220,7 +259,7 @@ const getMessages = async (req, res) => {
         "receiver.type": "Group",
         "receiver.id": groupId,
       })
-        .populate("sender", "email username")
+        .populate("sender", "email username profilePicture")
         .populate("receiver.id", "name")
         .populate("replyTo", "content");
       return res.status(httpStatus.OK).json(messages);
@@ -240,8 +279,8 @@ const getMessages = async (req, res) => {
           { sender: receiver._id, receiver: { type: "User", id: sender._id } },
         ],
       })
-        .populate("sender", "email username")
-        .populate("receiver.id", "email username");
+        .populate("sender", "email username profilePicture")
+        .populate("receiver.id", "email username profilePicture");
 
       return res.status(httpStatus.OK).json(messages);
     }
